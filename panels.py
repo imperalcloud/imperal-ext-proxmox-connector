@@ -9,7 +9,7 @@ from app import ext
 async def panel_proxmox(ctx):
     return ui.Page(
         title="Proxmox Connector",
-        sections=[
+        children=[
             ui.Section(
                 title="What this extension does",
                 children=[

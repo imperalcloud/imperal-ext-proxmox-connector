@@ -219,5 +219,5 @@ class ProxmoxStatusRecord(sdl.Entity):
         return data
 
 
-class ConnectionParams(sdl.Schema):
+class ConnectionParams:
     connection_id: str = Field(description="Saved Proxmox connection identifier")
