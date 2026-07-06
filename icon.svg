@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Proxmox Connector">
+  <rect width="128" height="128" rx="24" fill="#111827"/>
+  <path d="M32 36h30c20 0 34 10 34 28s-14 28-34 28H32V36zm18 16v24h12c10 0 16-4 16-12s-6-12-16-12H50z" fill="#f97316"/>
+</svg>
