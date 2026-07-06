@@ -46,6 +46,10 @@
             "type": "string",
             "default": ""
           },
+          "userbname": {
+            "type": "string",
+            "default": ""
+          },
           "password": {
             "type": "string",
             "default": ""
