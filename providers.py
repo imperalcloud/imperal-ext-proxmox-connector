@@ -246,14 +246,21 @@ async def connect_and_persist(
             raise ProxmoxError("Login failed: no auth ticket returned")
 
     client = ProxmoxClient(base_url, headers=headers, tls_verify=tls_verify, ticket=ticket, csrf_token=csrf)
-    version = await client.request("GET", "/version")
-    nodes = await client.request("GET", "/nodes")
+    try:
+        version = await client.request("GET", "/version")
+        nodes = await client.request("GET", "/nodes")
+    except ProxmoxError as e:
+        raise ProxmoxError(f"Connection test failed after authentication: {e}") from e
 
     cluster_name = ""
     try:
         cluster_status = await client.request("GET", "/cluster/status")
-    except ProxmoxError:
-        cluster_status = []
+    except ProxmoxError as e:
+        message = str(e)
+        if "Permission check failed" in message:
+            cluster_status = []
+        else:
+            raise
     if isinstance(cluster_status, list):
         for item in cluster_status:
             if item.get("type") == "cluster":
