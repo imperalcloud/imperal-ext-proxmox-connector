@@ -22,7 +22,7 @@ def _nav_item(active: str, panel: str, title: str, icon: str):
         label=title,
         icon=icon,
         variant="primary" if active == panel else "outline",
-        on_click=ui.Call("tools", panel=panel, _sidebar_panel=panel),
+        on_click=ui.OpenPanel("proxmox-connector/tools", panel=panel, _sidebar_panel=panel),
         disabled=active == panel,
     )
 
@@ -41,7 +41,7 @@ async def _connections(ctx):
         return ui.Stack([
             ui.Empty(message="No Proxmox connections yet", icon="Server"),
             ui.Button("Open connect form", icon="Plug", variant="primary",
-                      on_click=ui.Call("tools", panel="connect")),
+                      on_click=ui.OpenPanel("proxmox-connector/tools", panel="connect")),
         ], gap=2)
 
     rows = []
@@ -58,9 +58,9 @@ async def _connections(ctx):
                     ui.Button("Test", icon="Activity", variant="secondary",
                               on_click=ui.Call("test_proxmox_connection", connection_id=cid)),
                     ui.Button("Load guests", icon="Monitor", variant="outline",
-                              on_click=ui.Call("tools", panel="guests", connection_id=cid)),
+                              on_click=ui.OpenPanel("proxmox-connector/tools", panel="guests", connection_id=cid)),
                     ui.Button("Load tasks", icon="ListTodo", variant="outline",
-                              on_click=ui.Call("tools", panel="tasks", connection_id=cid)),
+                              on_click=ui.OpenPanel("proxmox-connector/tools", panel="tasks", connection_id=cid)),
                     ui.Button("Delete", icon="Trash2", variant="danger",
                               on_click=ui.Call("disconnect_proxmox", connection_id=cid)),
                 ], direction="h", gap=2, wrap=True),
@@ -98,7 +98,7 @@ async def _guests(ctx, connection_id: str = "", node: str = "", guest_type: str 
         ui.Header("Guests", level=3,
                   subtitle=(connection_id or "first saved connection")),
         ui.Form(
-            action="tools",
+            action="proxmox-connector/tools",
             submit_label="Refresh",
             defaults={"panel": "guests", "connection_id": connection_id},
             children=[
@@ -156,11 +156,11 @@ def _overview_page():
         ),
         ui.Stack([
             ui.Button("Connect now", icon="Plug", variant="primary",
-                      on_click=ui.Call("tools", panel="connect")),
+                      on_click=ui.OpenPanel("proxmox-connector/tools", panel="connect")),
             ui.Button("Open connections", icon="Server", variant="outline",
-                      on_click=ui.Call("tools", panel="connections")),
+                      on_click=ui.OpenPanel("proxmox-connector/tools", panel="connections")),
             ui.Button("Open guests", icon="Monitor", variant="outline",
-                      on_click=ui.Call("tools", panel="guests")),
+                      on_click=ui.OpenPanel("proxmox-connector/tools", panel="guests")),
         ], direction="h", gap=2, wrap=True),
     ], gap=2)
 
@@ -379,7 +379,7 @@ async def proxmox_sidebar(ctx, panel: str = "overview", _sidebar_panel: str = ""
         ui.Header(text="Proxmox", level=3),
         ui.Stack(nav, direction="v", gap=1),
     ], gap=2)
-    root.props["auto_action"] = ui.Call("tools", panel=active_panel, _sidebar_panel=active_panel)
+    root.props["auto_action"] = ui.OpenPanel("proxmox-connector/tools", panel=active_panel, _sidebar_panel=active_panel)
     return root
 
 
