@@ -185,8 +185,11 @@ async def build_client_from_connection(ctx, connection: dict[str, Any]) -> Proxm
         async with httpx.AsyncClient(verify=tls_verify, timeout=20.0) as client:
             resp = await client.post(f"{connection['base_url']}/api2/json/access/ticket", data=payload)
         if resp.status_code >= 400:
-            raise ProxmoxError(f"Login failed: HTTP {resp.status_code}: {(resp.text or '')[:300]}")
-        data = resp.json().get("data") or {}
+            raise ProxmoxError(f"Login failed: HTTP {resp.status_code}: {(resp.text or '')[:1000]}")
+        try:
+            data = resp.json().get("data") or {}
+        except Exception as e:
+            raise ProxmoxError(f"Login failed: non-JSON response from Proxmox: {e}") from e
         ticket = data.get("ticket") or ""
         csrf = data.get("CSRFPreventionToken") or ""
         if not ticket:
@@ -232,8 +235,11 @@ async def connect_and_persist(
         async with httpx.AsyncClient(verify=tls_verify, timeout=20.0) as client:
             resp = await client.post(f"{base_url}/api2/json/access/ticket", data={"username": user_at_realm, "password": password})
         if resp.status_code >= 400:
-            raise ProxmoxError(f"Login failed: HTTP {resp.status_code}: {(resp.text or '')[:300]}")
-        data = resp.json().get("data") or {}
+            raise ProxmoxError(f"Login failed: HTTP {resp.status_code}: {(resp.text or '')[:1000]}")
+        try:
+            data = resp.json().get("data") or {}
+        except Exception as e:
+            raise ProxmoxError(f"Login failed: non-JSON response from Proxmox: {e}") from e
         ticket = data.get("ticket") or ""
         csrf = data.get("CSRFPreventionToken") or ""
         if not ticket:

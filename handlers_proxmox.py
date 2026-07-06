@@ -60,6 +60,8 @@ class ConnectProxmoxParams(BaseModel):
     realm: str = Field(default="pam", description="Authentication realm like pam, pve, or ldap")
     username: str = Field(default="", description="Proxmox username, with or without @realm")
     userbname: str = Field(default="", description="Temporary compatibility alias for panel payload typo; mirrors username when the UI submits userbname instead.")
+    user: str = Field(default="", description="Compatibility alias for UIs that submit user instead of username.")
+    login: str = Field(default="", description="Compatibility alias for UIs that submit login instead of username.")
     password: str = Field(default="", description="Password when auth_mode=password")
     token_id: str = Field(default="", description="API token identifier when auth_mode=api_token")
     token_secret: str = Field(default="", description="API token secret when auth_mode=api_token")
@@ -280,7 +282,7 @@ def _task_payload(connection: dict[str, Any], node: str, upid: Any, task_type: s
 @chat.function("connect_proxmox", action_type="write", event="connection.created", data_model=ProxmoxConnectionRecord,
                description="Connect a user's Proxmox VE host or cluster using API token or username/password and save the connection for future actions.")
 async def connect_proxmox(ctx, params: ConnectProxmoxParams) -> ActionResult:
-    username = (params.username or params.userbname or "").strip()
+    username = (params.username or params.userbname or params.user or params.login or "").strip()
     token_id = (params.token_id or "").strip()
     token_principal = (params.token_principal or "").strip()
     if token_principal:
@@ -304,7 +306,8 @@ async def connect_proxmox(ctx, params: ConnectProxmoxParams) -> ActionResult:
             label=params.label,
         )
     except ProxmoxError as e:
-        return ActionResult.error(str(e))
+        message = str(e)
+        return ActionResult.error(message, summary=f"Connect failed: {message}")
     return ActionResult.success(data=record, summary=f"Connected Proxmox '{record['label']}' at {record['base_url']}")
 
 
