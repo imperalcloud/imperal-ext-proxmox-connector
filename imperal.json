@@ -43,7 +43,8 @@
             "default": "pam"
           },
           "username": {
-            "type": "string"
+            "type": "string",
+            "default": ""
           },
           "password": {
             "type": "string",
@@ -54,6 +55,10 @@
             "default": ""
           },
           "token_secret": {
+            "type": "string",
+            "default": ""
+          },
+          "token_principal": {
             "type": "string",
             "default": ""
           },
@@ -68,8 +73,7 @@
         },
         "required": [
           "base_url",
-          "auth_mode",
-          "username"
+          "auth_mode"
         ]
       },
       "return_schema": {

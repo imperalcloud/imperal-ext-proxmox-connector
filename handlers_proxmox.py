@@ -58,10 +58,11 @@ class ConnectProxmoxParams(BaseModel):
     base_url: str = Field(description="Proxmox API base URL, for example https://pve.example.com:8006")
     auth_mode: Literal["api_token", "password"] = Field(description="Authentication mode")
     realm: str = Field(default="pam", description="Authentication realm like pam, pve, or ldap")
-    username: str = Field(description="Proxmox username, with or without @realm")
+    username: str = Field(default="", description="Proxmox username, with or without @realm")
     password: str = Field(default="", description="Password when auth_mode=password")
     token_id: str = Field(default="", description="API token identifier when auth_mode=api_token")
     token_secret: str = Field(default="", description="API token secret when auth_mode=api_token")
+    token_principal: str = Field(default="", description="Combined API token principal like root@pam!imperal-ext-connector. Optional shortcut; if set, username and token_id are derived from it.")
     tls_verify: bool = Field(default=True, description="Whether to verify TLS certificates")
     label: str = Field(default="", description="Optional friendly connection name")
 
@@ -278,15 +279,25 @@ def _task_payload(connection: dict[str, Any], node: str, upid: Any, task_type: s
 @chat.function("connect_proxmox", action_type="write", event="connection.created", data_model=ProxmoxConnectionRecord,
                description="Connect a user's Proxmox VE host or cluster using API token or username/password and save the connection for future actions.")
 async def connect_proxmox(ctx, params: ConnectProxmoxParams) -> ActionResult:
+    username = (params.username or "").strip()
+    token_id = (params.token_id or "").strip()
+    token_principal = (params.token_principal or "").strip()
+    if token_principal:
+        if "!" not in token_principal:
+            return ActionResult.error("token_principal must look like root@pam!token-name")
+        principal_username, principal_token_id = token_principal.split("!", 1)
+        username = username or principal_username.strip()
+        token_id = token_id or principal_token_id.strip()
+
     try:
         record = await connect_and_persist(
             ctx,
             base_url=params.base_url,
             auth_mode=params.auth_mode,
             realm=params.realm,
-            username=params.username,
+            username=username,
             password=params.password,
-            token_id=params.token_id,
+            token_id=token_id,
             token_secret=params.token_secret,
             tls_verify=params.tls_verify,
             label=params.label,
