@@ -188,7 +188,7 @@ def _connect_page():
                         {"value": "password", "label": "Username + password"},
                     ],
                 ),
-                ui.Input(param_name="username", value="root@pam", placeholder="Username, for example root@pam"),
+                ui.Input(param_name="username", placeholder="Username, for example root@pam"),
                 ui.Input(param_name="token_principal", placeholder="Optional shortcut: root@pam!imperal-ext-connector"),
                 ui.Input(param_name="realm", value="pam", placeholder="Realm, used only when username has no @realm"),
                 ui.Input(param_name="token_id", placeholder="Token ID only, for example imperal-ext-connector"),
