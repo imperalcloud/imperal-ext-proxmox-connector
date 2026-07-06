@@ -49,6 +49,24 @@ class ProxmoxClient:
         return payload.get("data") if isinstance(payload, dict) and "data" in payload else payload
 
 
+def _normalize_username_and_realm(username: str, realm: str) -> tuple[str, str, str]:
+    raw_username = (username or "").strip()
+    raw_realm = (realm or "pam").strip()
+    if not raw_username:
+        raise ProxmoxError("username is required")
+    if "!" in raw_username:
+        raise ProxmoxError("username must not include token id. Put only the Proxmox user into username, for example 'root@pam', and put the token name into token_id separately.")
+    if "@" in raw_username:
+        name, realm_from_username = raw_username.rsplit("@", 1)
+        if not name.strip() or not realm_from_username.strip():
+            raise ProxmoxError("username must be a valid Proxmox user like 'root@pam'")
+        return raw_username, raw_username, realm_from_username.strip()
+    if not raw_realm:
+        raise ProxmoxError("realm is required when username has no @realm")
+    user_at_realm = f"{raw_username}@{raw_realm}"
+    return raw_username, user_at_realm, raw_realm
+
+
 def _normalize_base_url(base_url: str) -> str:
     base_url = (base_url or "").strip()
     if not base_url:
@@ -193,21 +211,18 @@ async def connect_and_persist(
 ) -> dict[str, Any]:
     base_url = _normalize_base_url(base_url)
     auth_mode = (auth_mode or "").strip().lower()
-    realm = (realm or "pam").strip()
     username = (username or "").strip()
     token_id = (token_id or "").strip()
     label = (label or "").strip()
 
     if auth_mode not in {"api_token", "password"}:
         raise ProxmoxError("auth_mode must be 'api_token' or 'password'")
-    if not username:
-        raise ProxmoxError("username is required")
+    raw_username, user_at_realm, normalized_realm = _normalize_username_and_realm(username, realm)
     if auth_mode == "password" and not password:
         raise ProxmoxError("password is required when auth_mode=password")
     if auth_mode == "api_token" and (not token_id or not token_secret):
         raise ProxmoxError("token_id and token_secret are required when auth_mode=api_token")
 
-    user_at_realm = username if "@" in username else f"{username}@{realm}"
     headers: dict[str, str] = {}
     ticket = ""
     csrf = ""
@@ -226,10 +241,13 @@ async def connect_and_persist(
 
     client = ProxmoxClient(base_url, headers=headers, tls_verify=tls_verify, ticket=ticket, csrf_token=csrf)
     version = await client.request("GET", "/version")
-    cluster_status = await client.request("GET", "/cluster/status")
     nodes = await client.request("GET", "/nodes")
 
     cluster_name = ""
+    try:
+        cluster_status = await client.request("GET", "/cluster/status")
+    except ProxmoxError:
+        cluster_status = []
     if isinstance(cluster_status, list):
         for item in cluster_status:
             if item.get("type") == "cluster":
@@ -250,8 +268,8 @@ async def connect_and_persist(
         "cluster_name": cluster_name,
         "auth_mode": auth_mode,
         "tls_verify": tls_verify,
-        "username": username,
-        "realm": realm,
+        "username": raw_username,
+        "realm": normalized_realm,
         "user_at_realm": user_at_realm,
         "token_id": token_id if auth_mode == "api_token" else "",
         "secret_name": secret_name,

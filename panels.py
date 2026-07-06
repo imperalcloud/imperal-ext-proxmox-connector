@@ -22,14 +22,18 @@ def _nav_item(active: str, panel: str, title: str, icon: str):
         label=title,
         icon=icon,
         variant="primary" if active == panel else "outline",
-        on_click=ui.Call("__panel__tools", panel=panel),
+        on_click=ui.Call("__panel__tools", panel=panel, _sidebar_panel=panel),
+        disabled=active == panel,
     )
 
 
 async def _connections(ctx):
     try:
-        result = await ctx.extensions.call("proxmox-connector", "list_proxmox_connections", {})
+        result = await ctx.extensions.call("list_proxmox_connections", {})
         items = result.get("items", []) if isinstance(result, dict) else []
+        call_error = result.get("error") if isinstance(result, dict) else None
+        if call_error:
+            return ui.Alert(title="Connections failed", message=str(call_error), type="error")
     except Exception as exc:
         return ui.Alert(title="Connections failed", message=str(exc), type="error")
 
@@ -76,8 +80,11 @@ async def _guests(ctx, connection_id: str = "", node: str = "", guest_type: str 
             args["node"] = node
         if status:
             args["status"] = status
-        result = await ctx.extensions.call("proxmox-connector", "list_proxmox_guests", args)
+        result = await ctx.extensions.call("list_proxmox_guests", args)
         items = result.get("items", []) if isinstance(result, dict) else []
+        call_error = result.get("error") if isinstance(result, dict) else None
+        if call_error:
+            return ui.Alert(title="Guests failed", message=str(call_error), type="error")
     except Exception as exc:
         return ui.Alert(title="Guests failed", message=str(exc), type="error")
 
@@ -114,8 +121,11 @@ async def _guests(ctx, connection_id: str = "", node: str = "", guest_type: str 
 
 async def _tasks(ctx, connection_id: str = ""):
     try:
-        result = await ctx.extensions.call("proxmox-connector", "list_proxmox_tasks", {"connection_id": connection_id})
+        result = await ctx.extensions.call("list_proxmox_tasks", {"connection_id": connection_id})
         items = result.get("items", []) if isinstance(result, dict) else []
+        call_error = result.get("error") if isinstance(result, dict) else None
+        if call_error:
+            return ui.Alert(title="Tasks failed", message=str(call_error), type="error")
     except Exception as exc:
         return ui.Alert(title="Tasks failed", message=str(exc), type="error")
 
@@ -157,13 +167,19 @@ def _overview_page():
 
 def _connect_page():
     return ui.Stack([
-        ui.Header(text="Connect Proxmox", level=3),
+        ui.Header(text="Connect Proxmox", level=3,
+                  subtitle="Use either API token or username/password. Errors from Proxmox are shown in full."),
+        ui.Alert(
+            title="API token format",
+            message="Enter Username as the Proxmox user only, for example root@pam. Enter Token ID separately, for example imperal-ext-connector. Enter Token Secret in the secret field. Do not put root@pam!tokenid into Username if Token ID has its own field.",
+            type="info",
+        ),
         ui.Form(
             action="connect_proxmox",
             submit_label="Save connection",
             children=[
                 ui.Input(param_name="label", placeholder="Connection label (optional)"),
-                ui.Input(param_name="base_url", placeholder="https://pve.example.com:8006"),
+                ui.Input(param_name="base_url", placeholder="https://node1-us.webhostmost.com:8006"),
                 ui.Select(
                     param_name="auth_mode",
                     value="api_token",
@@ -172,11 +188,11 @@ def _connect_page():
                         {"value": "password", "label": "Username + password"},
                     ],
                 ),
-                ui.Input(param_name="username", placeholder="root@pam or service user"),
-                ui.Input(param_name="realm", value="pam", placeholder="pam"),
+                ui.Input(param_name="username", value="root@pam", placeholder="Username, for example root@pam"),
+                ui.Input(param_name="realm", value="pam", placeholder="Realm, used only when username has no @realm"),
+                ui.Input(param_name="token_id", placeholder="Token ID only, for example imperal-ext-connector"),
+                ui.Password(param_name="token_secret", placeholder="Token secret / value"),
                 ui.Password(param_name="password", placeholder="Password when auth mode = password"),
-                ui.Input(param_name="token_id", placeholder="Token ID when auth mode = api_token"),
-                ui.Password(param_name="token_secret", placeholder="Token secret when auth mode = api_token"),
                 ui.Toggle(label="Verify TLS certificates", value=True, param_name="tls_verify"),
             ],
         ),
@@ -355,13 +371,14 @@ def _create_lxc_page():
 
 
 @ext.panel("sidebar", slot="left", title="Proxmox", icon="Server")
-async def proxmox_sidebar(ctx, panel: str = "overview", **kwargs):
-    nav = [_nav_item(panel, key, title, icon) for key, title, icon in NAV_ITEMS]
+async def proxmox_sidebar(ctx, panel: str = "overview", _sidebar_panel: str = "", **kwargs):
+    active_panel = _sidebar_panel or panel or "overview"
+    nav = [_nav_item(active_panel, key, title, icon) for key, title, icon in NAV_ITEMS]
     root = ui.Stack([
         ui.Header(text="Proxmox", level=3),
         ui.Stack(nav, direction="v", gap=1),
     ], gap=2)
-    root.props["auto_action"] = ui.Call("__panel__tools", panel=panel)
+    root.props["auto_action"] = ui.Call("__panel__tools", panel=active_panel, _sidebar_panel=active_panel)
     return root
 
 
