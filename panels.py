@@ -205,7 +205,6 @@ def _connect_page():
                 ui.Password(param_name="api_key", placeholder="API key / token secret"),
                 ui.Input(param_name="realm", value="pam", placeholder="Realm, only used if API user has no @realm"),
                 ui.Toggle(label="Verify TLS certificates", value=True, param_name="tls_verify"),
-                ui.Input(param_name="auth_mode", value="api_token", placeholder="api_token", hidden=True),
             ],
         ),
     ], gap=2)
