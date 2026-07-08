@@ -52,20 +52,36 @@ def _result_payload(result: Any) -> dict[str, Any]:
     return {}
 
 
+def _extract_error_message(error: Any) -> str:
+    if not error:
+        return ""
+    if isinstance(error, str):
+        return error
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("detail") or error.get("error") or error)
+    message = getattr(error, "message", None)
+    if message:
+        return str(message)
+    detail = getattr(error, "detail", None)
+    if detail:
+        return str(detail)
+    return str(error)
+
+
 def _result_error(result: Any) -> str:
     if result is None:
         return ""
     if isinstance(result, dict):
-        error = result.get("error")
+        error = _extract_error_message(result.get("error"))
         if error:
-            return str(error)
+            return error
         summary = result.get("summary")
         if result.get("ok") is False and summary:
             return str(summary)
         return ""
-    error = getattr(result, "error", None)
+    error = _extract_error_message(getattr(result, "error", None))
     if error:
-        return str(error)
+        return error
     summary = getattr(result, "summary", None)
     ok_value = getattr(result, "ok", None)
     if ok_value is False and summary:
