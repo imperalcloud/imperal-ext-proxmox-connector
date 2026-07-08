@@ -56,14 +56,17 @@ class EmptyParams(BaseModel):
 
 class ConnectProxmoxParams(BaseModel):
     base_url: str = Field(description="Proxmox API base URL, for example https://pve.example.com:8006")
-    auth_mode: Literal["api_token", "password"] = Field(description="Authentication mode")
+    auth_mode: Literal["api_token"] = Field(default="api_token", description="Authentication mode")
     realm: str = Field(default="pam", description="Authentication realm like pam, pve, or ldap")
     username: str = Field(default="", description="Proxmox username, with or without @realm")
     user: str = Field(default="", description="Compatibility alias for UIs that submit user instead of username.")
     login: str = Field(default="", description="Compatibility alias for UIs that submit login instead of username.")
-    password: str = Field(default="", description="Password when auth_mode=password")
     token_id: str = Field(default="", description="API token identifier when auth_mode=api_token")
     token_secret: str = Field(default="", description="API token secret when auth_mode=api_token")
+    api_key: str = Field(default="", description="Compatibility alias for token_secret when UIs submit api_key.")
+    api_token: str = Field(default="", description="Compatibility alias for token_secret when UIs submit api_token.")
+    token_name: str = Field(default="", description="Compatibility alias for token_id when UIs submit token_name.")
+    api_user: str = Field(default="", description="Compatibility alias for username when UIs submit api_user.")
     token_principal: str = Field(default="", description="Combined API token principal like root@pam!imperal-ext-connector. Optional shortcut; if set, username and token_id are derived from it.")
     tls_verify: bool = Field(default=True, description="Whether to verify TLS certificates")
     label: str = Field(default="", description="Optional friendly connection name")
@@ -267,46 +270,85 @@ class DeleteGuestParams(GuestParams):
     destroy_owned_volumes: bool = Field(default=True, description="Destroy owned storage volumes together with the guest")
 
 
-def _task_payload(connection: dict[str, Any], node: str, upid: Any, task_type: str, description: str) -> dict[str, Any]:
-    return {
-        "connection_id": connection["connection_id"],
-        "node": node,
-        "task_id": upid,
-        "task_type": task_type,
-        "status": "queued",
-        "description": description,
-    }
+def _token_debug_hint(username: str, realm: str, token_id: str) -> str:
+    clean_username = (username or "").strip()
+    clean_realm = (realm or "").strip() or "pam"
+    clean_token_id = (token_id or "").strip()
+    if clean_username and "@" not in clean_username:
+        clean_username = f"{clean_username}@{clean_realm}"
+    principal = clean_username or f"<api_user>@{clean_realm}"
+    token = clean_token_id or "<token_name>"
+    return f"PVEAPIToken={principal}!{token}=***"
+
+
+def _connect_input_help(username: str, realm: str, token_id: str) -> str:
+    debug_hint = _token_debug_hint(username, realm, token_id)
+    lines = [
+        f"Expected header shape: {debug_hint}",
+        "Use the API user and token name as separate fields.",
+        "Example: api_user=root@pam and token_name=imperal-ext.",
+        "Do not paste the whole user@realm!token string into token_name.",
+    ]
+    if (username or "").strip() and "@" not in (username or ""):
+        clean_realm = (realm or "").strip() or "pam"
+        lines.append(f"Because api_user has no @realm, this connector will use '@{clean_realm}'.")
+    return " ".join(lines)
 
 
 @chat.function("connect_proxmox", action_type="write", event="connection.created", data_model=ProxmoxConnectionRecord,
-               description="Connect a user's Proxmox VE host or cluster using API token or username/password and save the connection for future actions.")
+               description="Connect a user's Proxmox VE host or cluster using an API token and save the connection for future actions.")
 async def connect_proxmox(ctx, params: ConnectProxmoxParams) -> ActionResult:
-    username = (params.username or params.user or params.login or "").strip()
-    token_id = (params.token_id or "").strip()
+    auth_mode = (params.auth_mode or "api_token").strip().lower()
+    if auth_mode != "api_token":
+        return ActionResult.error("Password authentication is disabled in this connector. Use an API user, token name, and API key instead.")
+    username = (params.username or params.api_user or params.user or params.login or "").strip()
+    token_id = (params.token_id or params.token_name or "").strip()
+    token_secret = (params.token_secret or params.api_key or params.api_token or "").strip()
     token_principal = (params.token_principal or "").strip()
+    debug_hint = _token_debug_hint(username, params.realm, token_id)
+    input_help = _connect_input_help(username, params.realm, token_id)
+    if not username:
+        return ActionResult.error("Missing API user. Fill api_user/username with the Proxmox API user, for example root@pam or imperal-ext-us@pam.", summary=input_help)
+    if not token_id and not token_principal:
+        return ActionResult.error("Missing token name. Fill token_name/token_id with only the token name, not the whole user@realm!token string.", summary=input_help)
+    if not token_secret:
+        return ActionResult.error("Missing API key. Fill api_key/token_secret with the Proxmox token secret value.", summary=input_help)
+    if token_id and "!" in token_id:
+        return ActionResult.error("token_name/token_id must contain only the token name after the exclamation mark, for example 'imperal-ext'. Do not paste 'user@realm!token' into this field.", summary=input_help)
     if token_principal:
         if "!" not in token_principal:
             return ActionResult.error("token_principal must look like root@pam!token-name")
         principal_username, principal_token_id = token_principal.split("!", 1)
         username = username or principal_username.strip()
         token_id = token_id or principal_token_id.strip()
+        if "!" in token_id:
+            return ActionResult.error("token_principal must contain only one exclamation mark: user@realm!token-name")
+        debug_hint = _token_debug_hint(username, params.realm, token_id)
+        input_help = _connect_input_help(username, params.realm, token_id)
 
     try:
         record = await connect_and_persist(
             ctx,
             base_url=params.base_url,
-            auth_mode=params.auth_mode,
+            auth_mode=auth_mode,
             realm=params.realm,
             username=username,
-            password=params.password,
+            password="",
             token_id=token_id,
-            token_secret=params.token_secret,
+            token_secret=token_secret,
             tls_verify=params.tls_verify,
             label=params.label,
+            allow_password_auth=False,
         )
     except ProxmoxError as e:
         message = str(e)
-        return ActionResult.error(message, summary=f"Connect failed: {message}")
+        hint = f"Tried token principal: {debug_hint}"
+        if "HTTP 401" in message:
+            return ActionResult.error(
+                f"{message} {hint}",
+                summary="Connect failed: host reachable, but token was rejected",
+            )
+        return ActionResult.error(f"{message} {hint}", summary=f"Connect failed: {message}")
     return ActionResult.success(data=record, summary=f"Connected Proxmox '{record['label']}' at {record['base_url']}")
 
 
@@ -547,7 +589,12 @@ async def _finalize_create_task(client, connection: dict[str, Any], node: str, g
     if start_after_create:
         start_upid = await client.request("POST", guest_path(guest_type, node, guest_id) + "/status/start")
         start_status = await wait_for_task(client, node, start_upid, timeout_seconds=timeout_seconds) if wait_for_completion else {"status": "queued", "exitstatus": None}
-        description = f"{guest_type.upper()} {guest_id} created on {node} and started"
+        description = f"{guest_type.upper()} {guest_id} created on {node} and start requested"
+        summary = (
+            f"{guest_type.upper()} {guest_id} was created on {node}. "
+            f"Create task: {create_upid}. Start task: {start_upid}. "
+            f"Current start status: {start_status.get('status') or 'queued'}."
+        )
         data = {
             "connection_id": connection["connection_id"],
             "node": node,
@@ -560,9 +607,14 @@ async def _finalize_create_task(client, connection: dict[str, Any], node: str, g
             "create_task_id": create_upid,
             "create_status": create_status.get("status"),
             "create_exitstatus": create_status.get("exitstatus"),
+            "next_step": "Use get_proxmox_task_status with the returned task_id if you want to poll the live task state later.",
         }
-        return ActionResult.success(data=data, summary=description)
+        return ActionResult.success(data=data, summary=summary)
     description = f"{guest_type.upper()} {guest_id} created on {node}"
+    summary = (
+        f"{guest_type.upper()} {guest_id} create request was accepted on {node}. "
+        f"Task: {create_upid}. Current status: {create_status.get('status') or 'queued'}."
+    )
     data = {
         "connection_id": connection["connection_id"],
         "node": node,
@@ -572,8 +624,9 @@ async def _finalize_create_task(client, connection: dict[str, Any], node: str, g
         "exitstatus": create_status.get("exitstatus"),
         "description": description,
         "vmid": guest_id,
+        "next_step": "Use get_proxmox_task_status with the returned task_id if you want to poll the live task state later.",
     }
-    return ActionResult.success(data=data, summary=description)
+    return ActionResult.success(data=data, summary=summary)
 
 
 @chat.function("create_proxmox_vm", action_type="write", event="guest.created", data_model=ProxmoxTaskRecord,
@@ -1077,7 +1130,7 @@ async def list_proxmox_tasks(ctx, params: ConnectionIdParams) -> ActionResult:
 
 
 @chat.function("get_proxmox_task_status", action_type="read", data_model=ProxmoxTaskRecord,
-               description="Check the status of one Proxmox task using its UPID.")
+               description="Check the status of one Proxmox task using its UPID. Use this after create, clone, delete, power, or snapshot actions when you want to poll live task progress.")
 async def get_proxmox_task_status(ctx, params: TaskStatusParams) -> ActionResult:
     try:
         connection = await resolve_connection(ctx, params.connection_id)

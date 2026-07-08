@@ -8,7 +8,7 @@ ext = Extension(
     version="0.4.0",
     display_name="Proxmox Connector",
     description=(
-        "Connect any Proxmox VE server or cluster with a URL plus either an API token or a password, "
+        "Connect any Proxmox VE server or cluster with a URL plus an API token, "
         "then inspect nodes, virtual machines, containers, storage, snapshots and tasks from Imperal."
     ),
     icon="icon.svg",

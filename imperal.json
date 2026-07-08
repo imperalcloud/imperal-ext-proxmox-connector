@@ -17,7 +17,7 @@
   "tools": [
     {
       "name": "connect_proxmox",
-      "description": "Connect a user's Proxmox VE host or cluster using API token or username/password and save the connection for future actions.",
+      "description": "Connect a user's Proxmox VE host or cluster using an API token and save the connection for future actions.",
       "action_type": "write",
       "chain_callable": true,
       "effects": [
@@ -34,9 +34,9 @@
           "auth_mode": {
             "type": "string",
             "enum": [
-              "api_token",
-              "password"
-            ]
+              "api_token"
+            ],
+            "default": "api_token"
           },
           "realm": {
             "type": "string",
@@ -46,7 +46,15 @@
             "type": "string",
             "default": ""
           },
-          "password": {
+          "api_user": {
+            "type": "string",
+            "default": ""
+          },
+          "user": {
+            "type": "string",
+            "default": ""
+          },
+          "login": {
             "type": "string",
             "default": ""
           },
@@ -54,7 +62,15 @@
             "type": "string",
             "default": ""
           },
+          "token_name": {
+            "type": "string",
+            "default": ""
+          },
           "token_secret": {
+            "type": "string",
+            "default": ""
+          },
+          "api_key": {
             "type": "string",
             "default": ""
           },
@@ -69,19 +85,10 @@
           "label": {
             "type": "string",
             "default": ""
-          },
-          "user": {
-            "type": "string",
-            "default": ""
-          },
-          "login": {
-            "type": "string",
-            "default": ""
           }
         },
         "required": [
-          "base_url",
-          "auth_mode"
+          "base_url"
         ]
       },
       "return_schema": {
@@ -1660,7 +1667,7 @@
     },
     {
       "name": "get_proxmox_task_status",
-      "description": "Check the status of one Proxmox task using its UPID.",
+      "description": "Check the status of one Proxmox task using its UPID. Use this after create, clone, delete, power, or snapshot actions when you want to poll live task progress.",
       "action_type": "read",
       "chain_callable": true,
       "effects": [],

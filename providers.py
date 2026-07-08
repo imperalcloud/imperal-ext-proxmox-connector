@@ -16,6 +16,21 @@ class ProxmoxError(Exception):
     pass
 
 
+def masked_token_preview(user_at_realm: str, token_id: str) -> str:
+    principal = (user_at_realm or "<api_user>@<realm>").strip() or "<api_user>@<realm>"
+    token = (token_id or "<token_name>").strip() or "<token_name>"
+    return f"PVEAPIToken={principal}!{token}=***"
+
+
+def auth_input_examples(user_at_realm: str, token_id: str) -> list[str]:
+    return [
+        f"Expected header shape: {masked_token_preview(user_at_realm, token_id)}",
+        "Use the API user and token name as separate fields.",
+        "Example: api_user=root@pam and token_name=imperal-ext.",
+        "Do not paste the whole user@realm!token string into the token name field.",
+    ]
+
+
 class ProxmoxClient:
     def __init__(self, base_url: str, headers: dict[str, str], tls_verify: bool = True, ticket: str = "", csrf_token: str = ""):
         self.base_url = base_url.rstrip("/")
@@ -39,6 +54,27 @@ class ProxmoxClient:
             resp = await client.request(method.upper(), url, headers=headers, params=params, data=data)
         if resp.status_code >= 400:
             body = (resp.text or "").strip()
+            preview = masked_token_preview(
+                self.headers.get("X-Imperal-Proxmox-User-At-Realm", ""),
+                self.headers.get("X-Imperal-Proxmox-Token-Id", ""),
+            )
+            if resp.status_code == 401:
+                examples = " ".join(
+                    auth_input_examples(
+                        self.headers.get("X-Imperal-Proxmox-User-At-Realm", ""),
+                        self.headers.get("X-Imperal-Proxmox-Token-Id", ""),
+                    )
+                )
+                raise ProxmoxError(
+                    "HTTP 401: Authentication failed. Host is reachable, but Proxmox rejected the token. "
+                    "Check the API user, token name, and API key. "
+                    f"Tried token principal: {preview}. {examples}"
+                )
+            if resp.status_code == 403:
+                raise ProxmoxError(
+                    "HTTP 403: Permission denied. Authentication worked, but this API user or token is not allowed to perform this Proxmox action. "
+                    f"Tried token principal: {preview}"
+                )
             raise ProxmoxError(f"HTTP {resp.status_code}: {body[:300] or '(empty body)'}")
         try:
             payload = resp.json()
@@ -60,7 +96,7 @@ def _normalize_username_and_realm(username: str, realm: str) -> tuple[str, str, 
         name, realm_from_username = raw_username.rsplit("@", 1)
         if not name.strip() or not realm_from_username.strip():
             raise ProxmoxError("username must be a valid Proxmox user like 'root@pam'")
-        return raw_username, raw_username, realm_from_username.strip()
+        return name.strip(), raw_username, realm_from_username.strip()
     if not raw_realm:
         raise ProxmoxError("realm is required when username has no @realm")
     user_at_realm = f"{raw_username}@{raw_realm}"
@@ -76,6 +112,10 @@ def _normalize_base_url(base_url: str) -> str:
     parsed = urlparse(base_url)
     if not parsed.netloc:
         raise ProxmoxError("Invalid Proxmox URL")
+    if parsed.path not in {"", "/"}:
+        raise ProxmoxError("base_url must point to the Proxmox host root, for example https://pve.example.com:8006, without /api2/json or other path suffixes")
+    if parsed.query or parsed.fragment:
+        raise ProxmoxError("base_url must not include query strings or fragments")
     netloc = parsed.netloc
     if ":" not in netloc:
         netloc = f"{netloc}:8006"
@@ -176,24 +216,8 @@ async def build_client_from_connection(ctx, connection: dict[str, Any]) -> Proxm
         user_at_realm = connection.get("user_at_realm") or ""
         token_id = connection.get("token_id") or ""
         headers["Authorization"] = f"PVEAPIToken={user_at_realm}!{token_id}={token_secret}"
-    elif auth_mode == "password":
-        password = await _secret_get(ctx, connection["secret_name"])
-        payload = {
-            "username": connection.get("user_at_realm") or "",
-            "password": password,
-        }
-        async with httpx.AsyncClient(verify=tls_verify, timeout=20.0) as client:
-            resp = await client.post(f"{connection['base_url']}/api2/json/access/ticket", data=payload)
-        if resp.status_code >= 400:
-            raise ProxmoxError(f"Login failed: HTTP {resp.status_code}: {(resp.text or '')[:1000]}")
-        try:
-            data = resp.json().get("data") or {}
-        except Exception as e:
-            raise ProxmoxError(f"Login failed: non-JSON response from Proxmox: {e}") from e
-        ticket = data.get("ticket") or ""
-        csrf = data.get("CSRFPreventionToken") or ""
-        if not ticket:
-            raise ProxmoxError("Login failed: no auth ticket returned")
+        headers["X-Imperal-Proxmox-User-At-Realm"] = user_at_realm
+        headers["X-Imperal-Proxmox-Token-Id"] = token_id
     else:
         raise ProxmoxError(f"Unsupported auth_mode '{auth_mode}'")
     return ProxmoxClient(connection["base_url"], headers=headers, tls_verify=tls_verify, ticket=ticket, csrf_token=csrf)
@@ -211,6 +235,7 @@ async def connect_and_persist(
     token_secret: str,
     tls_verify: bool,
     label: str,
+    allow_password_auth: bool = False,
 ) -> dict[str, Any]:
     base_url = _normalize_base_url(base_url)
     auth_mode = (auth_mode or "").strip().lower()
@@ -218,32 +243,19 @@ async def connect_and_persist(
     token_id = (token_id or "").strip()
     label = (label or "").strip()
 
-    if auth_mode not in {"api_token", "password"}:
-        raise ProxmoxError("auth_mode must be 'api_token' or 'password'")
+    if auth_mode != "api_token":
+        raise ProxmoxError("auth_mode must be 'api_token'")
     raw_username, user_at_realm, normalized_realm = _normalize_username_and_realm(username, realm)
-    if auth_mode == "password" and not password:
-        raise ProxmoxError("password is required when auth_mode=password")
-    if auth_mode == "api_token" and (not token_id or not token_secret):
+    if not token_id or not token_secret:
         raise ProxmoxError("token_id and token_secret are required when auth_mode=api_token")
+    if "!" in token_id:
+        raise ProxmoxError("token_id must be only the token name, not 'user@realm!token'. Put the API user into username/api_user and the token name into token_id/token_name separately.")
 
     headers: dict[str, str] = {}
     ticket = ""
     csrf = ""
-    if auth_mode == "api_token":
-        headers["Authorization"] = f"PVEAPIToken={user_at_realm}!{token_id}={token_secret}"
-    else:
-        async with httpx.AsyncClient(verify=tls_verify, timeout=20.0) as client:
-            resp = await client.post(f"{base_url}/api2/json/access/ticket", data={"username": user_at_realm, "password": password})
-        if resp.status_code >= 400:
-            raise ProxmoxError(f"Login failed: HTTP {resp.status_code}: {(resp.text or '')[:1000]}")
-        try:
-            data = resp.json().get("data") or {}
-        except Exception as e:
-            raise ProxmoxError(f"Login failed: non-JSON response from Proxmox: {e}") from e
-        ticket = data.get("ticket") or ""
-        csrf = data.get("CSRFPreventionToken") or ""
-        if not ticket:
-            raise ProxmoxError("Login failed: no auth ticket returned")
+    token_secret = (token_secret or "").strip()
+    headers["Authorization"] = f"PVEAPIToken={user_at_realm}!{token_id}={token_secret}"
 
     client = ProxmoxClient(base_url, headers=headers, tls_verify=tls_verify, ticket=ticket, csrf_token=csrf)
     try:
@@ -271,7 +283,7 @@ async def connect_and_persist(
 
     connection_id = uuid.uuid4().hex[:16]
     secret_name = SECRET_PREFIX + connection_id
-    secret_value = token_secret if auth_mode == "api_token" else password
+    secret_value = token_secret
     await _secret_set(ctx, secret_name, secret_value)
 
     record = {

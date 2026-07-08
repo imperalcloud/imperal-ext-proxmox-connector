@@ -8,7 +8,7 @@ This is now a usable operational MVP.
 
 It supports:
 - connecting one or more Proxmox VE endpoints per user
-- auth with either API token or username/password
+- API-token-only authentication
 - secure secret storage through Imperal secrets
 - test connection / health summary
 - cluster status summary
@@ -56,15 +56,17 @@ It supports:
 
 ## Authentication
 
-Two modes are supported:
+This connector now accepts only `api_token` mode.
 
-1. `api_token`
-   - user provides `username`, `realm`, `token_id`, `token_secret`
-   - extension authenticates with `Authorization: PVEAPIToken=...`
+User provides:
+- `api_user` / `username` as the Proxmox API user, for example `imperal-ext-us@pam`
+- `token_name` / `token_id` as the token name only, for example `imperal-ext`
+- `api_key` / `token_secret` as the token secret value
 
-2. `password`
-   - user provides `username`, `realm`, `password`
-   - extension logs in via `/access/ticket` and uses the returned ticket + CSRF token
+The connector builds this header:
+- `Authorization: PVEAPIToken=<user@realm>!<token_name>=<token_secret>`
+
+Password auth is intentionally disabled in the connector.
 
 Secrets are stored separately from normal connection metadata.
 
@@ -115,7 +117,6 @@ Still intentionally MVP-sized:
 - no backup job scheduling yet
 - no ISO upload yet
 - no advanced network/firewall management yet
-- no panel forms yet — chat tools are the real interface for now
 - no template/image import pipeline yet
 
 ## Create flow behavior
@@ -142,7 +143,7 @@ The create flow is now much more correct and production-friendly for a base MVP:
 - `models_proxmox.py` — SDL entities
 - `providers.py` — Proxmox API client + connection persistence
 - `handlers_proxmox.py` — chat tools
-- `panels.py` — simple panel landing page
+- `panels.py` — interactive Proxmox panel forms and navigation
 - `imperal.json` — manifest
 
 ## Git repository
