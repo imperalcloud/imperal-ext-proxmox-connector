@@ -29,13 +29,13 @@ def _nav_item(active: str, panel: str, title: str, icon: str):
 
 async def _connections(ctx):
     try:
-        result = await ctx.run_action("list_proxmox_connections", {})
-        items = (getattr(result, "data", None) or {}).get("items", [])
-        call_error = getattr(result, "error", None)
-        if call_error:
-            return ui.Alert(title="Connections failed", message=str(call_error), type="error")
+        result = await ctx.extensions.call("proxmox-connector", "list_proxmox_connections", {})
+        items = (result or {}).get("items", [])
     except Exception as exc:
         return ui.Alert(title="Connections failed", message=str(exc), type="error")
+
+    if isinstance(result, dict) and result.get("error"):
+        return ui.Alert(title="Connections failed", message=str(result.get("error")), type="error")
 
     if not items:
         return ui.Stack([
@@ -80,13 +80,13 @@ async def _guests(ctx, connection_id: str = "", node: str = "", guest_type: str 
             args["node"] = node
         if status:
             args["status"] = status
-        result = await ctx.run_action("list_proxmox_guests", args)
-        items = (getattr(result, "data", None) or {}).get("items", [])
-        call_error = getattr(result, "error", None)
-        if call_error:
-            return ui.Alert(title="Guests failed", message=str(call_error), type="error")
+        result = await ctx.extensions.call("proxmox-connector", "list_proxmox_guests", args)
+        items = (result or {}).get("items", [])
     except Exception as exc:
         return ui.Alert(title="Guests failed", message=str(exc), type="error")
+
+    if isinstance(result, dict) and result.get("error"):
+        return ui.Alert(title="Guests failed", message=str(result.get("error")), type="error")
 
     rows = []
     for item in items:
@@ -121,13 +121,13 @@ async def _guests(ctx, connection_id: str = "", node: str = "", guest_type: str 
 
 async def _tasks(ctx, connection_id: str = ""):
     try:
-        result = await ctx.run_action("list_proxmox_tasks", {"connection_id": connection_id})
-        items = (getattr(result, "data", None) or {}).get("items", [])
-        call_error = getattr(result, "error", None)
-        if call_error:
-            return ui.Alert(title="Tasks failed", message=str(call_error), type="error")
+        result = await ctx.extensions.call("proxmox-connector", "list_proxmox_tasks", {"connection_id": connection_id})
+        items = (result or {}).get("items", [])
     except Exception as exc:
         return ui.Alert(title="Tasks failed", message=str(exc), type="error")
+
+    if isinstance(result, dict) and result.get("error"):
+        return ui.Alert(title="Tasks failed", message=str(result.get("error")), type="error")
 
     rows = [ui.ListItem(id=i.get("id", ""), title=i.get("title", "task"), subtitle=i.get("id", "")) for i in items]
     return ui.Stack([
