@@ -343,12 +343,21 @@ async def connect_proxmox(ctx, params: ConnectProxmoxParams) -> ActionResult:
     except ProxmoxError as e:
         message = str(e)
         hint = f"Tried token principal: {debug_hint}"
+        summary = f"Connect failed: {message}"
         if "HTTP 401" in message:
-            return ActionResult.error(
-                f"{message} {hint}",
-                summary="Connect failed: host reachable, but token was rejected",
-            )
-        return ActionResult.error(f"{message} {hint}", summary=f"Connect failed: {message}")
+            summary = "Connect failed: host reachable, but token was rejected"
+        elif "HTTP 403" in message:
+            summary = "Connect failed: token accepted by host, but access was forbidden"
+        elif "certificate" in message.lower() or "tls" in message.lower() or "ssl" in message.lower():
+            summary = "Connect failed: TLS or certificate validation problem"
+        elif "timeout" in message.lower():
+            summary = "Connect failed: request timed out before Proxmox answered"
+        elif "connection" in message.lower() or "refused" in message.lower() or "name or service not known" in message.lower():
+            summary = "Connect failed: could not reach the Proxmox host"
+        return ActionResult.error(
+            f"{message} {hint}",
+            summary=f"{summary}. {hint}",
+        )
     return ActionResult.success(data=record, summary=f"Connected Proxmox '{record['label']}' at {record['base_url']}")
 
 

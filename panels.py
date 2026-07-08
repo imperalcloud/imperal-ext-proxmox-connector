@@ -29,9 +29,9 @@ def _nav_item(active: str, panel: str, title: str, icon: str):
 
 async def _connections(ctx):
     try:
-        result = await ctx.extensions.call("list_proxmox_connections", {})
-        items = result.get("items", []) if isinstance(result, dict) else []
-        call_error = result.get("error") if isinstance(result, dict) else None
+        result = await ctx.run_action("list_proxmox_connections", {})
+        items = (getattr(result, "data", None) or {}).get("items", [])
+        call_error = getattr(result, "error", None)
         if call_error:
             return ui.Alert(title="Connections failed", message=str(call_error), type="error")
     except Exception as exc:
@@ -80,9 +80,9 @@ async def _guests(ctx, connection_id: str = "", node: str = "", guest_type: str 
             args["node"] = node
         if status:
             args["status"] = status
-        result = await ctx.extensions.call("list_proxmox_guests", args)
-        items = result.get("items", []) if isinstance(result, dict) else []
-        call_error = result.get("error") if isinstance(result, dict) else None
+        result = await ctx.run_action("list_proxmox_guests", args)
+        items = (getattr(result, "data", None) or {}).get("items", [])
+        call_error = getattr(result, "error", None)
         if call_error:
             return ui.Alert(title="Guests failed", message=str(call_error), type="error")
     except Exception as exc:
@@ -121,9 +121,9 @@ async def _guests(ctx, connection_id: str = "", node: str = "", guest_type: str 
 
 async def _tasks(ctx, connection_id: str = ""):
     try:
-        result = await ctx.extensions.call("list_proxmox_tasks", {"connection_id": connection_id})
-        items = result.get("items", []) if isinstance(result, dict) else []
-        call_error = result.get("error") if isinstance(result, dict) else None
+        result = await ctx.run_action("list_proxmox_tasks", {"connection_id": connection_id})
+        items = (getattr(result, "data", None) or {}).get("items", [])
+        call_error = getattr(result, "error", None)
         if call_error:
             return ui.Alert(title="Tasks failed", message=str(call_error), type="error")
     except Exception as exc:
