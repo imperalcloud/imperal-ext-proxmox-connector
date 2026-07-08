@@ -100,6 +100,19 @@ async def _call_panel_action(ctx, action: str, **kwargs):
     return result, ""
 
 
+def _panel_connect_action() -> str:
+    connect_fn = getattr(ext, "tool", None)
+    if callable(connect_fn):
+        try:
+            connect_tool = connect_fn("connect_proxmox")
+            action_name = getattr(connect_tool, "name", None)
+            if action_name:
+                return str(action_name)
+        except Exception:
+            pass
+    return "connect_proxmox"
+
+
 async def _connections(ctx):
     result, error = await _call_panel_action(ctx, "list_proxmox_connections")
     if error:
@@ -295,7 +308,7 @@ def _connect_page():
             ], gap=1),
         ),
         ui.Form(
-            action="connect_proxmox",
+            action=_panel_connect_action(),
             submit_label="Save connection",
             defaults={"auth_mode": "api_token", "realm": "pam", "tls_verify": True},
             children=[

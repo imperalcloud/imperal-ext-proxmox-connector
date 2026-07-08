@@ -256,6 +256,8 @@ async def connect_and_persist(
     csrf = ""
     token_secret = (token_secret or "").strip()
     headers["Authorization"] = f"PVEAPIToken={user_at_realm}!{token_id}={token_secret}"
+    headers["X-Imperal-Proxmox-User-At-Realm"] = user_at_realm
+    headers["X-Imperal-Proxmox-Token-Id"] = token_id
 
     client = ProxmoxClient(base_url, headers=headers, tls_verify=tls_verify, ticket=ticket, csrf_token=csrf)
     try:
