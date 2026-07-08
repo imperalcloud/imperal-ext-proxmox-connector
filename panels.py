@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from imperal_sdk import ui
 from app import ext
 
@@ -27,80 +29,158 @@ def _nav_item(active: str, panel: str, title: str, icon: str):
     )
 
 
-async def _connections(ctx):
+def _safe_text(value: Any, fallback: str = "—") -> str:
+    if value is None:
+        return fallback
+    text = str(value).strip()
+    return text or fallback
+
+
+def _result_payload(result: Any) -> dict[str, Any]:
+    if result is None:
+        return {}
+    if isinstance(result, dict):
+        return result
+    data = getattr(result, "data", None)
+    if isinstance(data, dict):
+        return data
+    model_dump = getattr(result, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        if isinstance(dumped, dict):
+            return dumped
+    return {}
+
+
+def _result_error(result: Any) -> str:
+    if result is None:
+        return ""
+    if isinstance(result, dict):
+        error = result.get("error")
+        if error:
+            return str(error)
+        summary = result.get("summary")
+        if result.get("ok") is False and summary:
+            return str(summary)
+        return ""
+    error = getattr(result, "error", None)
+    if error:
+        return str(error)
+    summary = getattr(result, "summary", None)
+    ok_value = getattr(result, "ok", None)
+    if ok_value is False and summary:
+        return str(summary)
+    return ""
+
+
+async def _call_panel_action(ctx, action: str, **kwargs):
     try:
-        result = await ctx.extensions.call("proxmox-connector", "list_proxmox_connections", {})
-        items = (result or {}).get("items", [])
+        result = await ctx.extensions.call("proxmox-connector", action, **kwargs)
     except Exception as exc:
-        return ui.Alert(title="Connections failed", message=str(exc), type="error")
+        return None, str(exc)
+    error = _result_error(result)
+    if error:
+        return result, error
+    return result, ""
 
-    if isinstance(result, dict) and result.get("error"):
-        return ui.Alert(title="Connections failed", message=str(result.get("error")), type="error")
 
+async def _connections(ctx):
+    result, error = await _call_panel_action(ctx, "list_proxmox_connections")
+    if error:
+        return ui.Alert(title="Connections failed", message=error, type="error")
+
+    items = _result_payload(result).get("items", [])
     if not items:
         return ui.Stack([
             ui.Empty(message="No Proxmox connections yet", icon="Server"),
-            ui.Button("Open connect form", icon="Plug", variant="primary",
-                      on_click=ui.Call("__panel__tools", panel="connect")),
+            ui.Button(
+                "Open connect form",
+                icon="Plug",
+                variant="primary",
+                on_click=ui.Call("__panel__tools", panel="connect", _sidebar_panel="connect"),
+            ),
         ], gap=2)
 
     rows = []
     for item in items:
-        cid = item.get("id", "")
-        title = item.get("title", cid or "connection")
+        cid = _safe_text(item.get("connection_id") or item.get("id"), "")
+        title = _safe_text(item.get("label") or item.get("title"), cid or "connection")
+        subtitle = _safe_text(item.get("base_url") or cid)
         rows.append(ui.ListItem(
             id=cid or title,
             title=title,
-            subtitle=cid,
+            subtitle=subtitle,
             expandable=True,
             expanded_content=[
                 ui.Stack([
-                    ui.Button("Test", icon="Activity", variant="secondary",
-                              on_click=ui.Call("test_proxmox_connection", connection_id=cid)),
-                    ui.Button("Load guests", icon="Monitor", variant="outline",
-                              on_click=ui.Call("__panel__tools", panel="guests", connection_id=cid)),
-                    ui.Button("Load tasks", icon="ListTodo", variant="outline",
-                              on_click=ui.Call("__panel__tools", panel="tasks", connection_id=cid)),
-                    ui.Button("Delete", icon="Trash2", variant="danger",
-                              on_click=ui.Call("disconnect_proxmox", connection_id=cid)),
-                ], direction="h", gap=2, wrap=True),
+                    ui.Text(_safe_text(item.get("description"), "No extra details")),
+                    ui.Stack([
+                        ui.Button(
+                            "Test",
+                            icon="Activity",
+                            variant="secondary",
+                            on_click=ui.Call("test_proxmox_connection", connection_id=cid),
+                        ),
+                        ui.Button(
+                            "Load guests",
+                            icon="Monitor",
+                            variant="outline",
+                            on_click=ui.Call("__panel__tools", panel="guests", connection_id=cid, _sidebar_panel="guests"),
+                        ),
+                        ui.Button(
+                            "Load tasks",
+                            icon="ListTodo",
+                            variant="outline",
+                            on_click=ui.Call("__panel__tools", panel="tasks", connection_id=cid, _sidebar_panel="tasks"),
+                        ),
+                        ui.Button(
+                            "Delete",
+                            icon="Trash2",
+                            variant="danger",
+                            on_click=ui.Call("disconnect_proxmox", connection_id=cid),
+                        ),
+                    ], direction="h", gap=2, wrap=True),
+                ], gap=2),
             ],
         ))
 
     return ui.Stack([
-        ui.Header("Saved connections", level=3),
+        ui.Header(text="Saved connections", level=3),
         ui.List(items=rows),
     ], gap=2)
 
 
 async def _guests(ctx, connection_id: str = "", node: str = "", guest_type: str = "all", status: str = ""):
-    try:
-        args = {"connection_id": connection_id, "guest_type": guest_type}
-        if node:
-            args["node"] = node
-        if status:
-            args["status"] = status
-        result = await ctx.extensions.call("proxmox-connector", "list_proxmox_guests", args)
-        items = (result or {}).get("items", [])
-    except Exception as exc:
-        return ui.Alert(title="Guests failed", message=str(exc), type="error")
+    args = {"connection_id": connection_id, "guest_type": guest_type}
+    if node:
+        args["node"] = node
+    if status:
+        args["status"] = status
 
-    if isinstance(result, dict) and result.get("error"):
-        return ui.Alert(title="Guests failed", message=str(result.get("error")), type="error")
+    result, error = await _call_panel_action(ctx, "list_proxmox_guests", **args)
+    if error:
+        return ui.Alert(title="Guests failed", message=error, type="error")
 
+    items = _result_payload(result).get("items", [])
     rows = []
     for item in items:
-        gid = item.get("id", "")
-        title = item.get("title", gid or "guest")
-        rows.append(ui.ListItem(id=gid or title, title=title, subtitle=gid))
+        gid = _safe_text(item.get("id"), "")
+        name = _safe_text(item.get("name") or item.get("title"), gid or "guest")
+        subtitle = f"{_safe_text(item.get('guest_type'), 'guest')} · VMID {_safe_text(item.get('vmid'))} · {_safe_text(item.get('node'))} · {_safe_text(item.get('status'))}"
+        rows.append(ui.ListItem(
+            id=gid or name,
+            title=name,
+            subtitle=subtitle,
+            expandable=True,
+            expanded_content=[ui.Text(_safe_text(item.get("description"), "No extra details"))],
+        ))
 
     return ui.Stack([
-        ui.Header("Guests", level=3,
-                  subtitle=(connection_id or "first saved connection")),
+        ui.Header(text="Guests", level=3, subtitle=(connection_id or "first saved connection")),
         ui.Form(
             action="__panel__tools",
             submit_label="Refresh",
-            defaults={"panel": "guests", "connection_id": connection_id},
+            defaults={"panel": "guests", "connection_id": connection_id, "_sidebar_panel": "guests"},
             children=[
                 ui.Input(param_name="node", value=node, placeholder="Node (optional)"),
                 ui.Select(
@@ -120,26 +200,37 @@ async def _guests(ctx, connection_id: str = "", node: str = "", guest_type: str 
 
 
 async def _tasks(ctx, connection_id: str = ""):
-    try:
-        result = await ctx.extensions.call("proxmox-connector", "list_proxmox_tasks", {"connection_id": connection_id})
-        items = (result or {}).get("items", [])
-    except Exception as exc:
-        return ui.Alert(title="Tasks failed", message=str(exc), type="error")
+    result, error = await _call_panel_action(ctx, "list_proxmox_tasks", connection_id=connection_id)
+    if error:
+        return ui.Alert(title="Tasks failed", message=error, type="error")
 
-    if isinstance(result, dict) and result.get("error"):
-        return ui.Alert(title="Tasks failed", message=str(result.get("error")), type="error")
+    items = _result_payload(result).get("items", [])
+    rows = []
+    for item in items:
+        task_id = _safe_text(item.get("task_id") or item.get("upid") or item.get("id"), "")
+        title = _safe_text(item.get("task_type") or item.get("title"), "task")
+        subtitle = f"{_safe_text(item.get('node'))} · {_safe_text(item.get('status'))} · {_safe_text(item.get('exitstatus'))}"
+        rows.append(ui.ListItem(
+            id=task_id or title,
+            title=title,
+            subtitle=subtitle,
+            expandable=True,
+            expanded_content=[ui.Text(_safe_text(item.get("description"), "No extra details"))],
+        ))
 
-    rows = [ui.ListItem(id=i.get("id", ""), title=i.get("title", "task"), subtitle=i.get("id", "")) for i in items]
     return ui.Stack([
-        ui.Header("Recent tasks", level=3, subtitle=(connection_id or "first saved connection")),
+        ui.Header(text="Recent tasks", level=3, subtitle=(connection_id or "first saved connection")),
         ui.List(items=rows) if rows else ui.Empty(message="No recent tasks", icon="ListTodo"),
     ], gap=2)
 
 
 def _overview_page():
     return ui.Stack([
-        ui.Header(text="Proxmox Connector", level=3,
-                  subtitle="Manage your Proxmox VE cluster from Imperal with stricter forms, safer validation, and clearer results."),
+        ui.Header(
+            text="Proxmox Connector",
+            level=3,
+            subtitle="Manage your Proxmox VE cluster from Imperal with stricter forms, safer validation, and clearer results.",
+        ),
         ui.Card(
             title="What you can do here",
             content=ui.Stats(children=[
@@ -162,24 +253,18 @@ def _overview_page():
             ], gap=1),
         ),
         ui.Stack([
-            ui.Button("Connect now", icon="Plug", variant="primary",
-                      on_click=ui.Call("__panel__tools", panel="connect")),
-            ui.Button("Open connections", icon="Server", variant="outline",
-                      on_click=ui.Call("__panel__tools", panel="connections")),
-            ui.Button("Browse guests", icon="Monitor", variant="outline",
-                      on_click=ui.Call("__panel__tools", panel="guests")),
-            ui.Button("Create VM", icon="PlusSquare", variant="outline",
-                      on_click=ui.Call("__panel__tools", panel="create-vm")),
-            ui.Button("Create LXC", icon="Package", variant="outline",
-                      on_click=ui.Call("__panel__tools", panel="create-lxc")),
+            ui.Button("Connect now", icon="Plug", variant="primary", on_click=ui.Call("__panel__tools", panel="connect", _sidebar_panel="connect")),
+            ui.Button("Open connections", icon="Server", variant="outline", on_click=ui.Call("__panel__tools", panel="connections", _sidebar_panel="connections")),
+            ui.Button("Browse guests", icon="Monitor", variant="outline", on_click=ui.Call("__panel__tools", panel="guests", _sidebar_panel="guests")),
+            ui.Button("Create VM", icon="PlusSquare", variant="outline", on_click=ui.Call("__panel__tools", panel="create-vm", _sidebar_panel="create-vm")),
+            ui.Button("Create LXC", icon="Package", variant="outline", on_click=ui.Call("__panel__tools", panel="create-lxc", _sidebar_panel="create-lxc")),
         ], direction="h", gap=2, wrap=True),
     ], gap=2)
 
 
 def _connect_page():
     return ui.Stack([
-        ui.Header(text="Connect Proxmox", level=3,
-                  subtitle="API token only. Password login is disabled in this connector for safety."),
+        ui.Header(text="Connect Proxmox", level=3, subtitle="API token only. Password login is disabled in this connector for safety."),
         ui.Alert(
             title="Use three separate values",
             message="Fill the API user, the token name, and the API key separately. Example: API user = imperal-ext-us@pam, Token name = imperal-ext, API key = the token secret value.",
@@ -317,8 +402,7 @@ def _snapshots_page():
 
 def _create_vm_page():
     return ui.Stack([
-        ui.Header(text="Create QEMU VM", level=3,
-                  subtitle="For full virtual machines with their own kernel, virtual hardware, and optional ISO or cloud-init setup."),
+        ui.Header(text="Create QEMU VM", level=3, subtitle="For full virtual machines with their own kernel, virtual hardware, and optional ISO or cloud-init setup."),
         ui.Alert(
             title="What is validated before create",
             message="The connector checks the node, VMID, target storage, bridge, and optional ISO/cloud-init storage before it submits the VM create task.",
@@ -366,8 +450,7 @@ def _create_vm_page():
 
 def _create_lxc_page():
     return ui.Stack([
-        ui.Header(text="Create LXC container", level=3,
-                  subtitle="For lightweight system containers that share the host kernel and usually start faster with less overhead."),
+        ui.Header(text="Create LXC container", level=3, subtitle="For lightweight system containers that share the host kernel and usually start faster with less overhead."),
         ui.Alert(
             title="What is validated before create",
             message="The connector checks the node, CTID, rootfs storage, bridge, and the exact container template before it submits the LXC create task.",
