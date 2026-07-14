@@ -10,9 +10,13 @@ NAV_ITEMS = [
     ("overview", "Overview", "LayoutDashboard"),
     ("connect", "Connect", "Plug"),
     ("connections", "Connections", "Server"),
+    ("nodes", "Nodes", "Cpu"),
+    ("storage", "Storage", "HardDrive"),
     ("guests", "Guests", "Monitor"),
     ("power", "Power", "Power"),
     ("snapshots", "Snapshots", "Camera"),
+    ("clone", "Clone", "Copy"),
+    ("delete", "Delete", "Trash2"),
     ("create-vm", "Create VM", "PlusSquare"),
     ("create-lxc", "Create LXC", "Package"),
     ("tasks", "Tasks", "ListTodo"),
@@ -196,12 +200,47 @@ async def _guests(ctx, connection_id: str = "", node: str = "", guest_type: str 
         gid = _safe_text(item.get("id"), "")
         name = _safe_text(item.get("name") or item.get("title"), gid or "guest")
         subtitle = f"{_safe_text(item.get('guest_type'), 'guest')} · VMID {_safe_text(item.get('vmid'))} · {_safe_text(item.get('node'))} · {_safe_text(item.get('status'))}"
+        item_node = _safe_text(item.get("node"), "")
+        item_vmid = _safe_text(item.get("vmid"), "")
+        item_gtype = _safe_text(item.get("guest_type"), "qemu")
+        if item_gtype not in ("qemu", "lxc"):
+            item_gtype = "qemu"
         rows.append(ui.ListItem(
             id=gid or name,
             title=name,
             subtitle=subtitle,
             expandable=True,
-            expanded_content=[ui.Text(_safe_text(item.get("description"), "No extra details"))],
+            expanded_content=[
+                ui.Stack([
+                    ui.Text(_safe_text(item.get("description"), "No extra details")),
+                    ui.Stack([
+                        ui.Button(
+                            "Power",
+                            icon="Power",
+                            variant="outline",
+                            on_click=ui.Call("__panel__tools", panel="power", connection_id=connection_id, node=item_node, guest_id=item_vmid, guest_type=item_gtype, _sidebar_panel="power"),
+                        ),
+                        ui.Button(
+                            "Snapshots",
+                            icon="Camera",
+                            variant="outline",
+                            on_click=ui.Call("__panel__tools", panel="snapshots", connection_id=connection_id, node=item_node, guest_id=item_vmid, guest_type=item_gtype, _sidebar_panel="snapshots"),
+                        ),
+                        ui.Button(
+                            "Clone",
+                            icon="Copy",
+                            variant="outline",
+                            on_click=ui.Call("__panel__tools", panel="clone", connection_id=connection_id, node=item_node, guest_id=item_vmid, guest_type=item_gtype, _sidebar_panel="clone"),
+                        ),
+                        ui.Button(
+                            "Delete",
+                            icon="Trash2",
+                            variant="danger",
+                            on_click=ui.Call("__panel__tools", panel="delete", connection_id=connection_id, node=item_node, guest_id=item_vmid, guest_type=item_gtype, _sidebar_panel="delete"),
+                        ),
+                    ], direction="h", gap=2, wrap=True),
+                ], gap=2),
+            ],
         ))
 
     return ui.Stack([
@@ -253,13 +292,143 @@ async def _tasks(ctx, connection_id: str = ""):
     ], gap=2)
 
 
-def _overview_page():
+async def _nodes(ctx, connection_id: str = ""):
+    result, error = await _call_panel_action(ctx, "list_proxmox_nodes", connection_id=connection_id)
+    if error:
+        return ui.Alert(title="Nodes failed", message=error, type="error")
+
+    items = _result_payload(result).get("items", [])
+    rows = []
+    for item in items:
+        node_name = _safe_text(item.get("node"), "node")
+        cpu = item.get("cpu")
+        maxcpu = item.get("maxcpu")
+        mem = item.get("mem")
+        maxmem = item.get("maxmem")
+        cpu_text = f"{round(float(cpu) * 100, 1)}%" if isinstance(cpu, (int, float)) else "—"
+        mem_text = (
+            f"{round(mem / (1024**3), 1)}G / {round(maxmem / (1024**3), 1)}G"
+            if isinstance(mem, (int, float)) and isinstance(maxmem, (int, float)) and maxmem
+            else "—"
+        )
+        subtitle = f"{_safe_text(item.get('status'))} · CPU {cpu_text} of {_safe_text(maxcpu)} · RAM {mem_text}"
+        rows.append(ui.ListItem(
+            id=node_name,
+            title=node_name,
+            subtitle=subtitle,
+            expandable=True,
+            expanded_content=[
+                ui.Stack([
+                    ui.Button(
+                        "View storage",
+                        icon="HardDrive",
+                        variant="outline",
+                        on_click=ui.Call("__panel__tools", panel="storage", connection_id=connection_id, node=node_name, _sidebar_panel="storage"),
+                    ),
+                    ui.Button(
+                        "View guests",
+                        icon="Monitor",
+                        variant="outline",
+                        on_click=ui.Call("__panel__tools", panel="guests", connection_id=connection_id, node=node_name, _sidebar_panel="guests"),
+                    ),
+                ], direction="h", gap=2, wrap=True),
+            ],
+        ))
+
+    return ui.Stack([
+        ui.Header(text="Cluster nodes", level=3, subtitle=(connection_id or "first saved connection")),
+        ui.Form(
+            action="__panel__tools",
+            submit_label="Refresh",
+            defaults={"panel": "nodes", "connection_id": connection_id, "_sidebar_panel": "nodes"},
+            children=[
+                ui.Input(param_name="connection_id", value=connection_id, placeholder="Connection ID (optional)"),
+            ],
+        ),
+        ui.List(items=rows) if rows else ui.Empty(message="No nodes found", icon="Cpu"),
+    ], gap=2)
+
+
+async def _storage(ctx, connection_id: str = "", node: str = ""):
+    args = {"connection_id": connection_id}
+    if node:
+        args["node"] = node
+
+    result, error = await _call_panel_action(ctx, "list_proxmox_storage", **args)
+    if error:
+        return ui.Alert(title="Storage failed", message=error, type="error")
+
+    items = _result_payload(result).get("items", [])
+    rows = []
+    for item in items:
+        storage_id = _safe_text(item.get("storage"), "storage")
+        used = item.get("used")
+        total = item.get("total")
+        used_text = (
+            f"{round(used / (1024**3), 1)}G / {round(total / (1024**3), 1)}G"
+            if isinstance(used, (int, float)) and isinstance(total, (int, float)) and total
+            else "—"
+        )
+        subtitle = f"{_safe_text(item.get('node'))} · {_safe_text(item.get('type'))} · {used_text} · content: {_safe_text(item.get('content'))}"
+        rows.append(ui.ListItem(
+            id=f"{_safe_text(item.get('node'))}:{storage_id}",
+            title=storage_id,
+            subtitle=subtitle,
+            expandable=True,
+            expanded_content=[ui.Text(_safe_text(item.get("description"), "No extra details"))],
+        ))
+
+    return ui.Stack([
+        ui.Header(text="Storage", level=3, subtitle=(connection_id or "first saved connection")),
+        ui.Form(
+            action="__panel__tools",
+            submit_label="Refresh",
+            defaults={"panel": "storage", "connection_id": connection_id, "_sidebar_panel": "storage"},
+            children=[
+                ui.Input(param_name="connection_id", value=connection_id, placeholder="Connection ID (optional)"),
+                ui.Input(param_name="node", value=node, placeholder="Node filter (optional)"),
+            ],
+        ),
+        ui.List(items=rows) if rows else ui.Empty(message="No storage found", icon="HardDrive"),
+    ], gap=2)
+
+
+async def _overview_page(ctx):
+    live_card = None
+    connections_result, connections_error = await _call_panel_action(ctx, "list_proxmox_connections")
+    connections = _result_payload(connections_result).get("items", []) if not connections_error else []
+
+    if connections:
+        status_result, status_error = await _call_panel_action(ctx, "get_proxmox_status")
+        if status_error:
+            live_card = ui.Alert(title="Cluster status unavailable", message=status_error, type="warning")
+        else:
+            s = _result_payload(status_result)
+            live_card = ui.Card(
+                title=_safe_text(s.get("cluster_name"), "Connected cluster"),
+                content=ui.Stats(children=[
+                    ui.Stat(label="Nodes online", value=f"{_safe_text(s.get('nodes_online'), '0')}/{_safe_text(s.get('nodes_total'), '0')}", color=("green" if s.get("status") == "ok" else "yellow")),
+                    ui.Stat(label="Guests running", value=f"{_safe_text(s.get('guests_running'), '0')}/{_safe_text(s.get('guests_total'), '0')}", color="blue"),
+                    ui.Stat(label="QEMU VMs", value=_safe_text(s.get("qemu_total"), "0"), color="purple"),
+                    ui.Stat(label="LXC containers", value=_safe_text(s.get("lxc_total"), "0"), color="purple"),
+                    ui.Stat(label="Storage entries", value=_safe_text(s.get("storage_total"), "0"), color="gray"),
+                    ui.Stat(label="Status", value=_safe_text(s.get("status"), "unknown"), color=("green" if s.get("status") == "ok" else "yellow")),
+                ], columns=2),
+            )
+    else:
+        live_card = ui.Alert(
+            title="No Proxmox connection yet",
+            message="Connect a Proxmox host or cluster below to see live nodes, guests, and storage status here.",
+            type="info",
+        )
+
     return ui.Stack([
         ui.Header(
             text="Proxmox Connector",
             level=3,
             subtitle="Manage your Proxmox VE cluster from Imperal with stricter forms, safer validation, and clearer results.",
         ),
+        live_card,
         ui.Card(
             title="What you can do here",
             content=ui.Stats(children=[
@@ -284,6 +453,8 @@ def _overview_page():
         ui.Stack([
             ui.Button("Connect now", icon="Plug", variant="primary", on_click=ui.Call("__panel__tools", panel="connect", _sidebar_panel="connect")),
             ui.Button("Open connections", icon="Server", variant="outline", on_click=ui.Call("__panel__tools", panel="connections", _sidebar_panel="connections")),
+            ui.Button("View nodes", icon="Cpu", variant="outline", on_click=ui.Call("__panel__tools", panel="nodes", _sidebar_panel="nodes")),
+            ui.Button("View storage", icon="HardDrive", variant="outline", on_click=ui.Call("__panel__tools", panel="storage", _sidebar_panel="storage")),
             ui.Button("Browse guests", icon="Monitor", variant="outline", on_click=ui.Call("__panel__tools", panel="guests", _sidebar_panel="guests")),
             ui.Button("Create VM", icon="PlusSquare", variant="outline", on_click=ui.Call("__panel__tools", panel="create-vm", _sidebar_panel="create-vm")),
             ui.Button("Create LXC", icon="Package", variant="outline", on_click=ui.Call("__panel__tools", panel="create-lxc", _sidebar_panel="create-lxc")),
@@ -324,19 +495,20 @@ def _connect_page():
     ], gap=2)
 
 
-def _power_page():
+def _power_page(connection_id: str = "", node: str = "", guest_id: str = "", guest_type: str = "qemu"):
     return ui.Stack([
         ui.Header(text="Guest power actions", level=3),
         ui.Form(
             action="power_proxmox_guest",
             submit_label="Run power action",
+            defaults={"connection_id": connection_id, "node": node, "guest_id": guest_id},
             children=[
-                ui.Input(param_name="connection_id", placeholder="Connection ID (optional)"),
-                ui.Input(param_name="node", placeholder="Node name"),
-                ui.Input(param_name="guest_id", placeholder="VMID / CTID"),
+                ui.Input(param_name="connection_id", value=connection_id, placeholder="Connection ID (optional)"),
+                ui.Input(param_name="node", value=node, placeholder="Node name"),
+                ui.Input(param_name="guest_id", value=guest_id, placeholder="VMID / CTID"),
                 ui.Select(
                     param_name="guest_type",
-                    value="qemu",
+                    value=guest_type or "qemu",
                     options=[
                         {"value": "qemu", "label": "QEMU VM"},
                         {"value": "lxc", "label": "LXC container"},
@@ -359,7 +531,8 @@ def _power_page():
     ], gap=2)
 
 
-def _snapshots_page():
+def _snapshots_page(connection_id: str = "", node: str = "", guest_id: str = "", guest_type: str = "qemu"):
+    gtype = guest_type or "qemu"
     return ui.Stack([
         ui.Header(text="Snapshots", level=3),
         ui.Card(
@@ -367,13 +540,14 @@ def _snapshots_page():
             content=ui.Form(
                 action="create_proxmox_snapshot",
                 submit_label="Create snapshot",
+                defaults={"connection_id": connection_id, "node": node, "guest_id": guest_id},
                 children=[
-                    ui.Input(param_name="connection_id", placeholder="Connection ID (optional)"),
-                    ui.Input(param_name="node", placeholder="Node name"),
-                    ui.Input(param_name="guest_id", placeholder="VMID / CTID"),
+                    ui.Input(param_name="connection_id", value=connection_id, placeholder="Connection ID (optional)"),
+                    ui.Input(param_name="node", value=node, placeholder="Node name"),
+                    ui.Input(param_name="guest_id", value=guest_id, placeholder="VMID / CTID"),
                     ui.Select(
                         param_name="guest_type",
-                        value="qemu",
+                        value=gtype,
                         options=[
                             {"value": "qemu", "label": "QEMU VM"},
                             {"value": "lxc", "label": "LXC container"},
@@ -390,13 +564,14 @@ def _snapshots_page():
             content=ui.Form(
                 action="delete_proxmox_snapshot",
                 submit_label="Delete snapshot",
+                defaults={"connection_id": connection_id, "node": node, "guest_id": guest_id},
                 children=[
-                    ui.Input(param_name="connection_id", placeholder="Connection ID (optional)"),
-                    ui.Input(param_name="node", placeholder="Node name"),
-                    ui.Input(param_name="guest_id", placeholder="VMID / CTID"),
+                    ui.Input(param_name="connection_id", value=connection_id, placeholder="Connection ID (optional)"),
+                    ui.Input(param_name="node", value=node, placeholder="Node name"),
+                    ui.Input(param_name="guest_id", value=guest_id, placeholder="VMID / CTID"),
                     ui.Select(
                         param_name="guest_type",
-                        value="qemu",
+                        value=gtype,
                         options=[
                             {"value": "qemu", "label": "QEMU VM"},
                             {"value": "lxc", "label": "LXC container"},
@@ -411,13 +586,14 @@ def _snapshots_page():
             content=ui.Form(
                 action="list_proxmox_snapshots",
                 submit_label="Show snapshots",
+                defaults={"connection_id": connection_id, "node": node, "guest_id": guest_id},
                 children=[
-                    ui.Input(param_name="connection_id", placeholder="Connection ID (optional)"),
-                    ui.Input(param_name="node", placeholder="Node name"),
-                    ui.Input(param_name="guest_id", placeholder="VMID / CTID"),
+                    ui.Input(param_name="connection_id", value=connection_id, placeholder="Connection ID (optional)"),
+                    ui.Input(param_name="node", value=node, placeholder="Node name"),
+                    ui.Input(param_name="guest_id", value=guest_id, placeholder="VMID / CTID"),
                     ui.Select(
                         param_name="guest_type",
-                        value="qemu",
+                        value=gtype,
                         options=[
                             {"value": "qemu", "label": "QEMU VM"},
                             {"value": "lxc", "label": "LXC container"},
@@ -425,6 +601,73 @@ def _snapshots_page():
                     ),
                 ],
             ),
+        ),
+    ], gap=2)
+
+
+def _clone_page(connection_id: str = "", node: str = "", guest_id: str = "", guest_type: str = "qemu"):
+    return ui.Stack([
+        ui.Header(text="Clone guest", level=3, subtitle="Duplicate an existing VM or container to a new VMID/CTID."),
+        ui.Alert(
+            title="Full vs linked clone",
+            message="Full clone copies all disk data and can move to a different storage/node. Linked clone (full=false) is faster but stays dependent on the source, and only works where the storage supports it.",
+            type="info",
+        ),
+        ui.Form(
+            action="clone_proxmox_guest",
+            submit_label="Clone guest",
+            defaults={"full": True, "start_after_clone": False, "connection_id": connection_id, "node": node, "source_guest_id": guest_id},
+            children=[
+                ui.Input(param_name="connection_id", value=connection_id, placeholder="Connection ID (optional)"),
+                ui.Input(param_name="node", value=node, placeholder="Source node"),
+                ui.Select(
+                    param_name="guest_type",
+                    value=guest_type or "qemu",
+                    options=[
+                        {"value": "qemu", "label": "QEMU VM"},
+                        {"value": "lxc", "label": "LXC container"},
+                    ],
+                ),
+                ui.Input(param_name="source_guest_id", value=guest_id, placeholder="Source VMID / CTID"),
+                ui.Input(param_name="new_guest_id", placeholder="New VMID / CTID"),
+                ui.Input(param_name="name", placeholder="New guest name (optional)"),
+                ui.Input(param_name="target_node", placeholder="Target node (optional; empty = same node)"),
+                ui.Input(param_name="target_storage", placeholder="Target storage (optional)"),
+                ui.Input(param_name="snapshot", placeholder="Clone from snapshot (optional)"),
+                ui.Toggle(label="Full clone", value=True, param_name="full"),
+                ui.Toggle(label="Start after clone", value=False, param_name="start_after_clone"),
+            ],
+        ),
+    ], gap=2)
+
+
+def _delete_page(connection_id: str = "", node: str = "", guest_id: str = "", guest_type: str = "qemu"):
+    return ui.Stack([
+        ui.Header(text="Delete guest", level=3, subtitle="Permanently remove a VM or container. This cannot be undone."),
+        ui.Alert(
+            title="Destructive action",
+            message="This stops and deletes the guest. By default owned storage volumes are destroyed with it. Double-check node, guest type, and ID before submitting.",
+            type="warning",
+        ),
+        ui.Form(
+            action="delete_proxmox_guest",
+            submit_label="Delete guest",
+            defaults={"destroy_owned_volumes": True, "purge_unreferenced_disks": False, "connection_id": connection_id, "node": node, "guest_id": guest_id},
+            children=[
+                ui.Input(param_name="connection_id", value=connection_id, placeholder="Connection ID (optional)"),
+                ui.Input(param_name="node", value=node, placeholder="Node name"),
+                ui.Select(
+                    param_name="guest_type",
+                    value=guest_type or "qemu",
+                    options=[
+                        {"value": "qemu", "label": "QEMU VM"},
+                        {"value": "lxc", "label": "LXC container"},
+                    ],
+                ),
+                ui.Input(param_name="guest_id", value=guest_id, placeholder="VMID / CTID"),
+                ui.Toggle(label="Destroy owned storage volumes", value=True, param_name="destroy_owned_volumes"),
+                ui.Toggle(label="Purge unreferenced disks", value=False, param_name="purge_unreferenced_disks"),
+            ],
         ),
     ], gap=2)
 
@@ -545,16 +788,24 @@ async def proxmox_tools(ctx,
         return _connect_page()
     if panel == "connections":
         return await _connections(ctx)
+    if panel == "nodes":
+        return await _nodes(ctx, connection_id=connection_id)
+    if panel == "storage":
+        return await _storage(ctx, connection_id=connection_id, node=node)
     if panel == "guests":
         return await _guests(ctx, connection_id=connection_id, node=node, guest_type=guest_type, status=status)
     if panel == "power":
-        return _power_page()
+        return _power_page(connection_id=connection_id, node=node, guest_id=kwargs.get("guest_id", ""), guest_type=(guest_type if guest_type in ("qemu", "lxc") else "qemu"))
     if panel == "snapshots":
-        return _snapshots_page()
+        return _snapshots_page(connection_id=connection_id, node=node, guest_id=kwargs.get("guest_id", ""), guest_type=(guest_type if guest_type in ("qemu", "lxc") else "qemu"))
+    if panel == "clone":
+        return _clone_page(connection_id=connection_id, node=node, guest_id=kwargs.get("guest_id", ""), guest_type=(guest_type if guest_type in ("qemu", "lxc") else "qemu"))
+    if panel == "delete":
+        return _delete_page(connection_id=connection_id, node=node, guest_id=kwargs.get("guest_id", ""), guest_type=(guest_type if guest_type in ("qemu", "lxc") else "qemu"))
     if panel == "create-vm":
         return _create_vm_page()
     if panel == "create-lxc":
         return _create_lxc_page()
     if panel == "tasks":
         return await _tasks(ctx, connection_id=connection_id)
-    return _overview_page()
+    return await _overview_page(ctx)
