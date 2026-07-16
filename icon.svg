@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Proxmox Connector">
-  <rect width="128" height="128" rx="24" fill="#111827"/>
-  <path d="M32 36h30c20 0 34 10 34 28s-14 28-34 28H32V36zm18 16v24h12c10 0 16-4 16-12s-6-12-16-12H50z" fill="#f97316"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#E57000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Proxmox Connector">
+  <rect width="20" height="8" x="2" y="2" rx="2" ry="2" />
+  <rect width="20" height="8" x="2" y="14" rx="2" ry="2" />
+  <line x1="6" x2="6.01" y1="6" y2="6" />
+  <line x1="6" x2="6.01" y1="18" y2="18" />
 </svg>
