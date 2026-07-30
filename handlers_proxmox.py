@@ -308,13 +308,13 @@ async def connect_proxmox(ctx, params: ConnectProxmoxParams) -> ActionResult:
     debug_hint = _token_debug_hint(username, params.realm, token_id)
     input_help = _connect_input_help(username, params.realm, token_id)
     if not username:
-        return ActionResult.error("Missing API user. Fill api_user/username with the Proxmox API user, for example root@pam or imperal-ext-us@pam.", summary=input_help)
+        return ActionResult.error("Missing API user. Fill api_user/username with the Proxmox API user, for example root@pam or imperal-ext-us@pam. " + input_help)
     if not token_id and not token_principal:
-        return ActionResult.error("Missing token name. Fill token_name/token_id with only the token name, not the whole user@realm!token string.", summary=input_help)
+        return ActionResult.error("Missing token name. Fill token_name/token_id with only the token name, not the whole user@realm!token string. " + input_help)
     if not token_secret:
-        return ActionResult.error("Missing API key. Fill api_key/token_secret with the Proxmox token secret value.", summary=input_help)
+        return ActionResult.error("Missing API key. Fill api_key/token_secret with the Proxmox token secret value. " + input_help)
     if token_id and "!" in token_id:
-        return ActionResult.error("token_name/token_id must contain only the token name after the exclamation mark, for example 'imperal-ext'. Do not paste 'user@realm!token' into this field.", summary=input_help)
+        return ActionResult.error("token_name/token_id must contain only the token name after the exclamation mark, for example 'imperal-ext'. Do not paste 'user@realm!token' into this field. " + input_help)
     if token_principal:
         if "!" not in token_principal:
             return ActionResult.error("token_principal must look like root@pam!token-name")
@@ -354,10 +354,7 @@ async def connect_proxmox(ctx, params: ConnectProxmoxParams) -> ActionResult:
             summary = "Connect failed: request timed out before Proxmox answered"
         elif "connection" in message.lower() or "refused" in message.lower() or "name or service not known" in message.lower():
             summary = "Connect failed: could not reach the Proxmox host"
-        return ActionResult.error(
-            f"{message} {hint}",
-            summary=f"{summary}. {hint}",
-        )
+        return ActionResult.error(f"{summary}. {message} {hint}")
     return ActionResult.success(data=record, summary=f"Connected Proxmox '{record['label']}' at {record['base_url']}")
 
 
@@ -977,6 +974,20 @@ async def create_proxmox_guest(ctx, params: CreateGuestParams) -> ActionResult:
         return ActionResult.success(data=data, summary=description)
     except ProxmoxError as e:
         return ActionResult.error(str(e))
+
+
+def _task_payload(connection: dict[str, Any], node: str, upid: Any, task_type: str, description: str) -> dict[str, Any]:
+    """Build the ProxmoxTaskRecord-shaped dict shared by the simple
+    fire-and-forget task handlers (delete/clone/power/snapshot create+delete).
+    Mirrors the fields _finalize_create_task uses for the create-guest flow."""
+    return {
+        "connection_id": connection["connection_id"],
+        "node": node,
+        "task_id": upid,
+        "task_type": task_type,
+        "status": "queued",
+        "description": description,
+    }
 
 
 @chat.function("delete_proxmox_guest", action_type="destructive", event="guest.deleted", data_model=ProxmoxTaskRecord,
